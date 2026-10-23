@@ -1,0 +1,12 @@
+# Runtime tools are installed or selected locally.
+/bin/
+
+# Downloaded media, HLS work files, and partial files.
+/downloads/
+*.work/
+*.part
+*.tmp
+*.download
+
+# Generated application binary.
+/HLSGo.exe
