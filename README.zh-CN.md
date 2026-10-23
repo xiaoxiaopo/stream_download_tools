@@ -14,6 +14,7 @@ HLSGo 是一个使用 Go 和 Fyne 编写的 Windows 图形界面视频下载工�
 - 本地保存任务状态和下载历史；历史记录支持单条删除和全部清空。删除历史记录不会删除已下载的视频文件。
 - 自动检查 yt-dlp 和 FFmpeg；缺少工具时可确认后下载到项目的 `bin` 目录。
 - 支持配置 HTTP、HTTPS 和 SOCKS5 代理，也可以在设置页选择用户自行下载的工具目录。
+- 遇到 Cloudflare 或登录验证时，可在设置页选择浏览器 Cookie 来源，并填写浏览器 User-Agent；启用后网页任务由 yt-dlp 下载。
 
 ## 下载方式说明
 
@@ -73,3 +74,4 @@ internal/tools/  yt-dlp、FFmpeg 检测、安装、解析和 yt-dlp 下载
 internal/hls/    HLS 播放列表解析、分片下载、解密和合并
 bin/             可选的本地 yt-dlp、FFmpeg 工具目录
 ```
+

@@ -31,9 +31,11 @@ const (
 )
 
 type Tool struct {
-	Path       string
-	PrefixArgs []string
-	Proxy      string
+	Path               string
+	PrefixArgs         []string
+	Proxy              string
+	CookiesFromBrowser string
+	UserAgent          string
 }
 
 type Set struct {
@@ -324,6 +326,7 @@ func ListHLSFormats(ctx context.Context, yt Tool, sourceURL string, maxHeight in
 	if strings.TrimSpace(yt.Proxy) != "" {
 		args = append(args, "--proxy", strings.TrimSpace(yt.Proxy))
 	}
+	args = appendYTDLPAuthArgs(args, yt)
 	args = append(args, sourceURL)
 	cmd := exec.CommandContext(ctx, yt.Path, args...)
 	var stderr bytes.Buffer
@@ -432,6 +435,16 @@ func bestYTDLPFormat(maxHeight int) string {
 	return "bv*+ba/b"
 }
 
+func appendYTDLPAuthArgs(args []string, yt Tool) []string {
+	if browser := strings.TrimSpace(yt.CookiesFromBrowser); browser != "" {
+		args = append(args, "--cookies-from-browser", browser)
+	}
+	if userAgent := strings.TrimSpace(yt.UserAgent); userAgent != "" {
+		args = append(args, "--user-agent", userAgent)
+	}
+	return args
+}
+
 var ytProgressPattern = regexp.MustCompile(`\[download\]\s+([0-9]+(?:\.[0-9]+)?)% of\s+~?([0-9]+(?:\.[0-9]+)?)\s*(B|KiB|MiB|GiB|TiB|KB|MB|GB|TB)`)
 
 // DownloadWithYTDLP downloads non-HLS formats through yt-dlp while leaving
@@ -453,6 +466,7 @@ func DownloadWithYTDLP(ctx context.Context, yt Tool, sourceURL, selector, output
 	if strings.TrimSpace(yt.Proxy) != "" {
 		args = append(args, "--proxy", strings.TrimSpace(yt.Proxy))
 	}
+	args = appendYTDLPAuthArgs(args, yt)
 	if strings.TrimSpace(ffmpegPath) != "" {
 		args = append(args, "--ffmpeg-location", filepath.Dir(ffmpegPath))
 	}
@@ -695,3 +709,4 @@ func replace(src, dst string) error {
 	}
 	return os.Rename(src, dst)
 }
+

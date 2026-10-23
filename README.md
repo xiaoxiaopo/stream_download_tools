@@ -13,6 +13,7 @@ Windows desktop video downloader written in Go with a Fyne graphical interface. 
 - TS concatenation and optional FFmpeg remux
 - yt-dlp fallback downloads for formats the Go HLS core does not handle
 - Batch queue, task pause/resume/cancel, progress, and saved download history
+- Optional browser cookies and User-Agent for sites that require a logged-in browser session; webpage downloads then use yt-dlp end to end
 
 This is an initial functional core, not a complete port of every N_m3u8DL-CLI option. DRM-protected streams are out of scope. Use it only for streams you are authorized to download.
 
@@ -34,3 +35,4 @@ Open `D:\.vscode\download_tools` as the VS Code folder, then press F5 and choose
 The window includes a download queue, per-task pause/resume/cancel controls, progress, a saved history, output-folder selection, and tool status. Completed segments remain in each task's work directory and are reused when the task is resumed.
 
 Fyne's desktop driver uses CGO on Windows. Build from a Go installation with a working MinGW-w64 GCC toolchain, as in the referenced TranslateTools project.
+

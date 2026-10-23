@@ -51,12 +51,14 @@ type parsedItem struct {
 }
 
 type appState struct {
-	Tasks      []task `json:"tasks"`
-	OutputDir  string `json:"output_dir"`
-	MaxHeight  int    `json:"max_height"`
-	YTDLPPath  string `json:"yt_dlp_path,omitempty"`
-	FFmpegPath string `json:"ffmpeg_path,omitempty"`
-	ProxyURL   string `json:"proxy_url,omitempty"`
+	Tasks          []task `json:"tasks"`
+	OutputDir      string `json:"output_dir"`
+	MaxHeight      int    `json:"max_height"`
+	YTDLPPath      string `json:"yt_dlp_path,omitempty"`
+	FFmpegPath     string `json:"ffmpeg_path,omitempty"`
+	ProxyURL       string `json:"proxy_url,omitempty"`
+	BrowserCookies string `json:"browser_cookies,omitempty"`
+	UserAgent      string `json:"user_agent,omitempty"`
 }
 
 type App struct {
@@ -86,15 +88,18 @@ type App struct {
 	ytPathEntry     *widget.Entry
 	ffmpegPathEntry *widget.Entry
 	proxyEntry      *widget.Entry
+	browserSelect   *widget.Select
+	userAgentEntry  *widget.Entry
 }
 
 func Run() {
 	a := app.NewWithID("local.hlsgo.downloader")
 	win := a.NewWindow("HLSGo 视频下载器")
-	win.Resize(fyne.NewSize(1040, 760))
-	win.CenterOnScreen()
 	ui := newApp(a, win)
 	win.SetContent(ui.build())
+	win.Resize(fyne.NewSize(1040, 760))
+	win.SetFixedSize(true)
+	win.CenterOnScreen()
 	ui.refreshTasks()
 	win.Show()
 	ui.checkTools()
@@ -211,6 +216,46 @@ func (a *App) buildSettingsPage() fyne.CanvasObject {
 	a.proxyEntry = widget.NewEntry()
 	a.proxyEntry.SetText(a.state.ProxyURL)
 	a.proxyEntry.SetPlaceHolder("例如 http://127.0.0.1:7890 或 socks5://127.0.0.1:1080")
+	browserNames := map[string]string{
+		"不使用浏览器 Cookie": "",
+		"Chrome":        "chrome",
+		"Edge":          "edge",
+		"Firefox":       "firefox",
+		"Brave":         "brave",
+		"Chromium":      "chromium",
+		"Opera":         "opera",
+		"Vivaldi":       "vivaldi",
+		"Whale":         "whale",
+	}
+	browserOptions := make([]string, 0, len(browserNames))
+	for _, name := range []string{"不使用浏览器 Cookie", "Chrome", "Edge", "Firefox", "Brave", "Chromium", "Opera", "Vivaldi", "Whale"} {
+		browserOptions = append(browserOptions, name)
+	}
+	a.browserSelect = widget.NewSelect(browserOptions, nil)
+	selectedBrowser := "不使用浏览器 Cookie"
+	for name, browser := range browserNames {
+		if browser == a.state.BrowserCookies {
+			selectedBrowser = name
+		}
+	}
+	a.browserSelect.SetSelected(selectedBrowser)
+	a.userAgentEntry = widget.NewEntry()
+	a.userAgentEntry.SetText(a.state.UserAgent)
+	a.userAgentEntry.SetPlaceHolder("Cloudflare 拦截时填写浏览器的完整 User-Agent")
+	saveBrowserAuth := widget.NewButton("保存 Cookie 设置", func() {
+		browser := browserNames[a.browserSelect.Selected]
+		userAgent := strings.TrimSpace(a.userAgentEntry.Text)
+		a.mu.Lock()
+		a.state.BrowserCookies = browser
+		a.state.UserAgent = userAgent
+		a.saveLocked()
+		set := a.toolSet
+		set.YTDLP.CookiesFromBrowser = browser
+		set.YTDLP.UserAgent = userAgent
+		a.toolSet = set
+		a.mu.Unlock()
+		dialog.ShowInformation("已保存", "Cookie 设置会用于 yt-dlp 解析和下载。启用浏览器 Cookie 后，网页任务将由 yt-dlp 完整下载。", a.window)
+	})
 	chooseToolFolder := func(title, executable string, entry *widget.Entry, store func(string)) {
 		a.chooseFolder(title, func(folder string) {
 			found, err := tools.FindToolInFolder(folder, executable)
@@ -248,13 +293,18 @@ func (a *App) buildSettingsPage() fyne.CanvasObject {
 		_ = os.MkdirAll(a.state.OutputDir, 0755)
 		_ = exec.Command("explorer.exe", a.state.OutputDir).Start()
 	})
-	return container.NewVBox(
+	return container.NewVScroll(container.NewVBox(
 		widget.NewCard("外部工具", "优先使用下方指定程序、项目 bin 或 PATH 中的程序；yt-dlp 也支持 Python pip 安装。", container.NewVBox(a.toolStatus,
 			container.NewBorder(nil, nil, widget.NewLabel("yt-dlp 文件夹"), chooseYt, a.ytPathEntry),
 			container.NewBorder(nil, nil, widget.NewLabel("FFmpeg 文件夹"), chooseFF, a.ffmpegPathEntry),
 			container.NewHBox(install, openDownloads))),
 		widget.NewCard("网络代理", "支持 HTTP、HTTPS 和 SOCKS5 代理。", container.NewVBox(container.NewBorder(nil, nil, widget.NewLabel("代理地址"), saveProxy, a.proxyEntry))),
-		widget.NewLabel("清晰度上限与保存目录可在下载页设置。"))
+		widget.NewCard("Cloudflare / 登录验证", "选择浏览器后，yt-dlp 会读取该浏览器的 Cookie。Cloudflare 可能还要求近期访问过目标站点，并使用同一网络和浏览器 User-Agent。", container.NewVBox(
+			container.NewBorder(nil, nil, widget.NewLabel("浏览器"), nil, a.browserSelect),
+			container.NewBorder(nil, nil, widget.NewLabel("User-Agent"), nil, a.userAgentEntry),
+			saveBrowserAuth,
+		)),
+		widget.NewLabel("清晰度上限与保存目录可在下载页设置。")))
 }
 
 func (a *App) chooseFolder(title string, selected func(string)) {
@@ -275,9 +325,12 @@ func (a *App) chooseFolder(title string, selected func(string)) {
 func (a *App) checkTools() {
 	a.mu.Lock()
 	ytPath, ffmpegPath, proxyURL := a.state.YTDLPPath, a.state.FFmpegPath, a.state.ProxyURL
+	browserCookies, userAgent := a.state.BrowserCookies, a.state.UserAgent
 	a.mu.Unlock()
 	set := tools.Find(a.rootDir, ytPath, ffmpegPath)
 	set.YTDLP.Proxy = proxyURL
+	set.YTDLP.CookiesFromBrowser = browserCookies
+	set.YTDLP.UserAgent = userAgent
 	a.mu.Lock()
 	a.toolSet = set
 	a.mu.Unlock()
@@ -378,12 +431,14 @@ func (a *App) checkTools() {
 					return
 				}
 				if ytPath != "" {
-					set.YTDLP = tools.Tool{Path: ytPath, Proxy: proxyURL}
+					set.YTDLP = tools.Tool{Path: ytPath, Proxy: proxyURL, CookiesFromBrowser: browserCookies, UserAgent: userAgent}
 				}
 				if ffmpegPath != "" {
 					set.FFmpeg = ffmpegPath
 				}
 				set.YTDLP.Proxy = proxyURL
+				set.YTDLP.CookiesFromBrowser = browserCookies
+				set.YTDLP.UserAgent = userAgent
 				a.mu.Lock()
 				a.toolSet = set
 				a.mu.Unlock()
@@ -465,6 +520,8 @@ func (a *App) parseLinks() {
 	maxHeight := a.state.MaxHeight
 	toolSet := a.toolSet
 	toolSet.YTDLP.Proxy = a.state.ProxyURL
+	toolSet.YTDLP.CookiesFromBrowser = a.state.BrowserCookies
+	toolSet.YTDLP.UserAgent = a.state.UserAgent
 	a.mu.Unlock()
 	go func() {
 		items := make([]parsedItem, 0, len(urls))
@@ -500,7 +557,10 @@ func (a *App) renderParsed() {
 			title = item.Source
 		}
 		if item.Err != "" {
-			objects = append(objects, widget.NewCard(title, "无法加入下载队列", container.NewVBox(widget.NewLabel(item.Err), widget.NewLabel("原始链接："+item.Source))))
+			summary := widget.NewLabel(summarizeError(item.Err))
+			summary.Wrapping = fyne.TextWrapWord
+			details := widget.NewButton("查看完整错误", func() { a.showParseErrorDetails(item.Source, item.Err) })
+			objects = append(objects, widget.NewCard(title, "解析失败", container.NewVBox(summary, details)))
 			continue
 		}
 		labels := make([]string, 0, len(item.Choices))
@@ -546,6 +606,25 @@ func (a *App) renderParsed() {
 	}
 	a.parsedList.Objects = objects
 	a.parsedList.Refresh()
+}
+
+func (a *App) showParseErrorDetails(source, message string) {
+	details := widget.NewLabel("链接：\n" + source + "\n\n错误详情：\n" + message)
+	details.Wrapping = fyne.TextWrapWord
+	content := container.NewGridWrap(fyne.NewSize(700, 420), container.NewScroll(details))
+	dlg := dialog.NewCustom("解析错误详情", "关闭", content, a.window)
+	dlg.Resize(fyne.NewSize(740, 470))
+	dlg.Show()
+}
+
+func summarizeError(message string) string {
+	compact := strings.Join(strings.Fields(message), " ")
+	const limit = 160
+	runes := []rune(compact)
+	if len(runes) <= limit {
+		return compact
+	}
+	return string(runes[:limit]) + "…"
 }
 
 func (a *App) addParsedTasks() {
@@ -605,7 +684,12 @@ func (a *App) addParsedTasks() {
 			}
 		}
 		outputPath := uniqueOutputPath(outDir, name+".mp4", a.state.Tasks)
-		t := task{ID: fmt.Sprintf("%d_%d", time.Now().UnixNano(), len(a.state.Tasks)), Source: item.Source, Title: item.Title, FormatID: item.Selected, FormatName: choiceName, UseYTDLP: !selectedChoice.Supported, YTDLPFormat: selectedChoice.YTDLPFormat, MaxHeight: maxHeight, Output: outputPath, Status: "等待中", UpdatedAt: time.Now()}
+		useYTDLP := !selectedChoice.Supported || a.state.BrowserCookies != ""
+		ytDLPFormat := selectedChoice.YTDLPFormat
+		if useYTDLP && ytDLPFormat == "" && selectedChoice.ID != "auto" && selectedChoice.ID != "direct" {
+			ytDLPFormat = selectedChoice.ID
+		}
+		t := task{ID: fmt.Sprintf("%d_%d", time.Now().UnixNano(), len(a.state.Tasks)), Source: item.Source, Title: item.Title, FormatID: item.Selected, FormatName: choiceName, UseYTDLP: useYTDLP, YTDLPFormat: ytDLPFormat, MaxHeight: maxHeight, Output: outputPath, Status: "等待中", UpdatedAt: time.Now()}
 		a.state.Tasks = append(a.state.Tasks, t)
 	}
 	a.state.OutputDir = outDir
@@ -679,6 +763,8 @@ func (a *App) downloadTask(ctx context.Context, t task) error {
 	a.mu.Lock()
 	toolSet := a.toolSet
 	proxyURL := a.state.ProxyURL
+	toolSet.YTDLP.CookiesFromBrowser = a.state.BrowserCookies
+	toolSet.YTDLP.UserAgent = a.state.UserAgent
 	a.mu.Unlock()
 	toolSet.YTDLP.Proxy = proxyURL
 	if t.UseYTDLP {
@@ -908,6 +994,8 @@ func (a *App) loadState() {
 	a.state.YTDLPPath = state.YTDLPPath
 	a.state.FFmpegPath = state.FFmpegPath
 	a.state.ProxyURL = state.ProxyURL
+	a.state.BrowserCookies = state.BrowserCookies
+	a.state.UserAgent = state.UserAgent
 	for i := range state.Tasks {
 		if state.Tasks[i].Status == "下载中" {
 			state.Tasks[i].Status = "暂停中"
@@ -986,3 +1074,4 @@ func uniqueOutputPath(dir, filename string, tasks []task) string {
 		}
 	}
 }
+
